@@ -9,8 +9,6 @@ const USERS = [
   { id: 727409, name: "Ofek Hacohen" },
 ];
 
-const TASK_TYPES = ["Small Task", "Medium Task", "Project"];
-
 const DESC_TEMPLATES = {
   "Small Task": `Why are we doing this and what's the goal?
 [Explain the reason and expected outcome]
