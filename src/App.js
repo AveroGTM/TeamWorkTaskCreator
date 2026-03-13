@@ -195,14 +195,12 @@ export default function TaskCreator() {
           "due-date": dueDate,
           "priority": form.priority,
           "estimated-minutes": parseInt(form.estimateHours) || 0,
-          "customFields": {
-            "customField": [
-              { "customFieldId": "98892", "value": form.difficulty },
-              { "customFieldId": "99301", "value": form.department },
-              { "customFieldId": "101290", "value": String(form.estimateLow) },
-              { "customFieldId": "101291", "value": String(form.estimateHigh) },
-            ]
-          }
+          "customFields": [
+            { "customFieldId": 98892, "value": form.difficulty },
+            { "customFieldId": 99301, "value": form.department },
+            { "customFieldId": 101290, "value": String(form.estimateLow) },
+            { "customFieldId": 101291, "value": String(form.estimateHigh) },
+          ]
         }
       };
       const r = await fetch(`${baseUrl}/tasklists/${form.taskList}/tasks.json`, {
