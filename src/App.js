@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const USERS = [
   { id: 708003, name: "Artium Koner" },
@@ -119,15 +119,24 @@ export default function TaskCreator() {
   const [loadingTL, setLoadingTL] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("tw_anthropic_key") || "");
+  const [showKeyInput, setShowKeyInput] = useState(false);
+
+  function saveApiKey(key) {
+    setApiKey(key);
+    if (key) localStorage.setItem("tw_anthropic_key", key);
+    else localStorage.removeItem("tw_anthropic_key");
+  }
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: null })); }
 
   useEffect(() => {
+    if (!apiKey) return;
     (async () => {
       setLoadingProjects(true);
       try {
         const r = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
           body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1500, mcp_servers: [{ type: "url", url: "https://mcp.ai.teamwork.com", name: "teamwork" }], messages: [{ role: "user", content: `List all active Teamwork projects. Return ONLY a JSON array: [{"id":123,"name":"Name"}]. No markdown, no explanation.` }] }),
         });
         const d = await r.json();
@@ -144,7 +153,7 @@ export default function TaskCreator() {
       } catch(e) { console.error(e); }
       setLoadingProjects(false);
     })();
-  }, []);
+  }, [apiKey]);
 
   async function onProjectChange(pid) {
     set("project", pid); set("taskList", ""); setTaskLists([]);
@@ -152,7 +161,7 @@ export default function TaskCreator() {
     setLoadingTL(true);
     try {
       const r = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 800, mcp_servers: [{ type: "url", url: "https://mcp.ai.teamwork.com", name: "teamwork" }], messages: [{ role: "user", content: `List all tasklists for Teamwork project ID ${pid}. Return ONLY a JSON array like: [{"id":123,"name":"Name"}]. No markdown, no explanation.` }] }),
       });
       const d = await r.json();
@@ -212,7 +221,7 @@ After creating the task, also set these custom fields on it:
 
 Return the task URL if available.`;
       const r = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, mcp_servers: [{ type: "url", url: "https://mcp.ai.teamwork.com", name: "teamwork" }], messages: [{ role: "user", content: prompt }] }),
       });
       const d = await r.json();
@@ -226,6 +235,36 @@ Return the task URL if available.`;
   const pName = projects.find(p => String(p.id) === String(form.project))?.name || "";
   const tlName = taskLists.find(t => String(t.id) === String(form.taskList))?.name || "";
   const uName = USERS.find(u => String(u.id) === String(form.assignedTo))?.name || "";
+
+  const apiKeyBar = (
+    <div style={{ marginBottom: "16px" }}>
+      {!apiKey ? (
+        <div style={{ background: "#fff8f0", border: "1.5px solid #f0c878", borderRadius: "12px", padding: "18px", textAlign: "center" }}>
+          <div style={{ fontSize: "13px", fontWeight: "700", color: "#8a6020", marginBottom: "8px" }}>Enter your Anthropic API Key to get started</div>
+          <div style={{ display: "flex", gap: "8px", maxWidth: "420px", margin: "0 auto" }}>
+            <input type="password" placeholder="sk-ant-..." value={apiKey} onChange={e => setApiKey(e.target.value)}
+              style={{ ...base, flex: 1, border: "1.5px solid #f0c878", background: "white", fontSize: "13px" }} />
+            <button onClick={() => saveApiKey(apiKey)} style={{ padding: "10px 20px", background: `linear-gradient(135deg,${G},${DG})`, border: "none", borderRadius: "8px", color: "white", fontWeight: "700", fontSize: "13px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>Save Key</button>
+          </div>
+          <div style={{ fontSize: "11px", color: "#b08030", marginTop: "6px" }}>Your key is stored locally in your browser only</div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button onClick={() => setShowKeyInput(!showKeyInput)} style={{ padding: "5px 12px", background: LG, border: `1.5px solid ${BR}`, borderRadius: "6px", color: G, fontSize: "11px", fontWeight: "600", cursor: "pointer", fontFamily: "inherit" }}>
+            {showKeyInput ? "Hide" : "API Key ⚙"}
+          </button>
+        </div>
+      )}
+      {showKeyInput && apiKey && (
+        <div style={{ display: "flex", gap: "8px", marginTop: "8px", alignItems: "center" }}>
+          <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)}
+            style={{ ...base, flex: 1, fontSize: "13px" }} />
+          <button onClick={() => saveApiKey(apiKey)} style={{ padding: "8px 16px", background: G, border: "none", borderRadius: "8px", color: "white", fontWeight: "600", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>Save</button>
+          <button onClick={() => { saveApiKey(""); setShowKeyInput(false); setProjects([]); setTaskLists([]); }} style={{ padding: "8px 16px", background: "#fff0f0", border: "1.5px solid #ffb0b0", borderRadius: "8px", color: "#c04040", fontWeight: "600", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>Remove</button>
+        </div>
+      )}
+    </div>
+  );
 
   if (result?.ok) return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#f0f9f4,#e8f4ee)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans',sans-serif", padding: "24px" }}>
@@ -266,6 +305,8 @@ Return the task URL if available.`;
             <div style={{ fontSize: "12px", color: MU }}>Create a task in Teamwork</div>
           </div>
         </div>
+
+        {apiKeyBar}
 
         <div style={{ background: "white", borderRadius: "18px", padding: "28px", boxShadow: "0 8px 40px rgba(14,98,69,.09)", border: "1px solid rgba(197,221,208,.5)" }}>
           <StepBar current={step} />
