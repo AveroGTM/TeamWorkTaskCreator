@@ -69,6 +69,13 @@ const G = "#1a7a56", DG = "#0e6245", LG = "#f0f9f4", BR = "#c5ddd0", TX = "#1a33
 
 const base = { width: "100%", padding: "10px 14px", borderRadius: "8px", border: `1.5px solid ${BR}`, background: "#f7fbf9", fontSize: "14px", fontFamily: "inherit", color: TX, boxSizing: "border-box", outline: "none" };
 
+function twHeaders(apiKey) {
+  return {
+    "Content-Type": "application/json",
+    "Authorization": `Basic ${btoa(apiKey + ":x")}`,
+  };
+}
+
 function StepBar({ current }) {
   return (
     <div style={{ display: "flex", alignItems: "flex-start", marginBottom: "30px" }}>
@@ -117,64 +124,43 @@ export default function TaskCreator() {
   const [loadingTL, setLoadingTL] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem("tw_anthropic_key") || "");
-  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("tw_api_key") || "");
+  const [subdomain, setSubdomain] = useState(() => localStorage.getItem("tw_subdomain") || "");
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsDraft, setSettingsDraft] = useState({ key: "", sub: "" });
 
-  function saveApiKey(key) {
-    setApiKey(key);
-    if (key) localStorage.setItem("tw_anthropic_key", key);
-    else localStorage.removeItem("tw_anthropic_key");
+  const configured = apiKey && subdomain;
+  const baseUrl = `https://${subdomain}.teamwork.com`;
+
+  function saveSettings(key, sub) {
+    const k = key.trim(), s = sub.trim();
+    setApiKey(k); setSubdomain(s);
+    if (k) localStorage.setItem("tw_api_key", k); else localStorage.removeItem("tw_api_key");
+    if (s) localStorage.setItem("tw_subdomain", s); else localStorage.removeItem("tw_subdomain");
+    setShowSettings(false);
   }
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: null })); }
 
   useEffect(() => {
-    if (!apiKey) return;
-    (async () => {
-      setLoadingProjects(true);
-      try {
-        const r = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST", headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-          body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1500, mcp_servers: [{ type: "url", url: "https://mcp.ai.teamwork.com", name: "teamwork" }], messages: [{ role: "user", content: `List all active Teamwork projects. Return ONLY a JSON array: [{"id":123,"name":"Name"}]. No markdown, no explanation.` }] }),
-        });
-        const d = await r.json();
-        const allText = (d.content || []).map(b => {
-          if (b.type === "text") return b.text;
-          if (b.type === "mcp_tool_result") return (b.content || []).map(c => c.text || "").join("");
-          return "";
-        }).join("\n");
-        const m = allText.match(/\[[\s\S]*?\]/);
-        if (m) {
-          const list = JSON.parse(m[0]);
-          setProjects(list.map(p => ({ id: p.id, name: p.name })).sort((a,b) => a.name.localeCompare(b.name)));
-        }
-      } catch(e) { console.error(e); }
-      setLoadingProjects(false);
-    })();
-  }, [apiKey]);
+    if (!configured) return;
+    setLoadingProjects(true);
+    fetch(`${baseUrl}/projects.json?status=active`, { headers: twHeaders(apiKey) })
+      .then(r => r.json())
+      .then(d => setProjects((d.projects || []).map(p => ({ id: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name))))
+      .catch(e => console.error("Failed to load projects:", e))
+      .finally(() => setLoadingProjects(false));
+  }, [apiKey, subdomain]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function onProjectChange(pid) {
     set("project", pid); set("taskList", ""); setTaskLists([]);
     if (!pid) return;
     setLoadingTL(true);
     try {
-      const r = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST", headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 800, mcp_servers: [{ type: "url", url: "https://mcp.ai.teamwork.com", name: "teamwork" }], messages: [{ role: "user", content: `List all tasklists for Teamwork project ID ${pid}. Return ONLY a JSON array like: [{"id":123,"name":"Name"}]. No markdown, no explanation.` }] }),
-      });
+      const r = await fetch(`${baseUrl}/projects/${pid}/tasklists.json`, { headers: twHeaders(apiKey) });
       const d = await r.json();
-      // Extract from all content blocks - text + mcp_tool_result
-      const allText = (d.content || []).map(b => {
-        if (b.type === "text") return b.text;
-        if (b.type === "mcp_tool_result") return (b.content || []).map(c => c.text || "").join("");
-        return "";
-      }).join("\n");
-      const m = allText.match(/\[[\s\S]*?\]/);
-      if (m) {
-        const lists = JSON.parse(m[0]);
-        setTaskLists(lists.map(t => ({ id: t.id, name: t.name })));
-      }
-    } catch (e) { console.error(e); }
+      setTaskLists((d.tasklists || []).map(t => ({ id: t.id, name: t.name })));
+    } catch (e) { console.error("Failed to load task lists:", e); }
     setLoadingTL(false);
   }
 
@@ -198,34 +184,40 @@ export default function TaskCreator() {
   async function submit() {
     setSubmitting(true);
     try {
-      const mins = parseInt(form.estimateHours) || 0;
-      const prompt = `Create a Teamwork task with the following details:
-- name: "${form.taskName}"
-- tasklist_id: ${form.taskList}
-- assignee user_id: ${form.assignedTo}
-- start_date: ${form.startDate}
-- due_date: ${form.dueDate}
-- priority: ${form.priority}
-- estimated_minutes: ${mins}
-- description: """
-${form.description}
-"""
-
-After creating the task, also set these custom fields on it:
-- Custom field ID 98892 (Task Difficulty): "${form.difficulty}"
-- Custom field ID 99301 (Department): "${form.department}"
-- Custom field ID 101290 (Estimated Minutes - Low): ${form.estimateLow}
-- Custom field ID 101291 (Estimated Minutes - High): ${form.estimateHigh}
-
-Return the task URL if available.`;
-      const r = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST", headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, mcp_servers: [{ type: "url", url: "https://mcp.ai.teamwork.com", name: "teamwork" }], messages: [{ role: "user", content: prompt }] }),
+      const startDate = form.startDate.replace(/-/g, "");
+      const dueDate = form.dueDate.replace(/-/g, "");
+      const body = {
+        "todo-item": {
+          "content": form.taskName,
+          "description": form.description,
+          "responsible-party-id": String(form.assignedTo),
+          "start-date": startDate,
+          "due-date": dueDate,
+          "priority": form.priority,
+          "estimated-minutes": parseInt(form.estimateHours) || 0,
+          "customFields": {
+            "customField": [
+              { "id": "98892", "value": form.difficulty },
+              { "id": "99301", "value": form.department },
+              { "id": "101290", "value": String(form.estimateLow) },
+              { "id": "101291", "value": String(form.estimateHigh) },
+            ]
+          }
+        }
+      };
+      const r = await fetch(`${baseUrl}/tasklists/${form.taskList}/tasks.json`, {
+        method: "POST",
+        headers: twHeaders(apiKey),
+        body: JSON.stringify(body),
       });
+      if (!r.ok) {
+        const errText = await r.text();
+        throw new Error(`HTTP ${r.status}: ${errText}`);
+      }
       const d = await r.json();
-      const txt = (d.content || []).filter(b => b.type === "text").map(b => b.text).join("");
-      const um = txt.match(/https:\/\/\S*teamwork\S*/i);
-      setResult({ ok: true, url: um ? um[0].replace(/[).]+$/, "") : null });
+      const taskId = d["todo-item"]?.id || d.id;
+      const url = taskId ? `https://${subdomain}.teamwork.com/tasks/${taskId}` : null;
+      setResult({ ok: true, url });
     } catch (e) { setResult({ ok: false, error: String(e) }); }
     setSubmitting(false);
   }
@@ -234,31 +226,61 @@ Return the task URL if available.`;
   const tlName = taskLists.find(t => String(t.id) === String(form.taskList))?.name || "";
   const uName = USERS.find(u => String(u.id) === String(form.assignedTo))?.name || "";
 
-  const apiKeyBar = (
+  const settingsBar = (
     <div style={{ marginBottom: "16px" }}>
-      {!apiKey ? (
-        <div style={{ background: "#fff8f0", border: "1.5px solid #f0c878", borderRadius: "12px", padding: "18px", textAlign: "center" }}>
-          <div style={{ fontSize: "13px", fontWeight: "700", color: "#8a6020", marginBottom: "8px" }}>Enter your Anthropic API Key to get started</div>
-          <div style={{ display: "flex", gap: "8px", maxWidth: "420px", margin: "0 auto" }}>
-            <input type="password" placeholder="sk-ant-..." value={apiKey} onChange={e => setApiKey(e.target.value)}
-              style={{ ...base, flex: 1, border: "1.5px solid #f0c878", background: "white", fontSize: "13px" }} />
-            <button onClick={() => saveApiKey(apiKey)} style={{ padding: "10px 20px", background: `linear-gradient(135deg,${G},${DG})`, border: "none", borderRadius: "8px", color: "white", fontWeight: "700", fontSize: "13px", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>Save Key</button>
+      {!configured ? (
+        <div style={{ background: "#fff8f0", border: "1.5px solid #f0c878", borderRadius: "12px", padding: "18px" }}>
+          <div style={{ fontSize: "13px", fontWeight: "700", color: "#8a6020", marginBottom: "12px", textAlign: "center" }}>Connect to Teamwork</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxWidth: "420px", margin: "0 auto" }}>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <span style={{ fontSize: "12px", color: TX, whiteSpace: "nowrap", minWidth: "80px" }}>Subdomain</span>
+              <div style={{ display: "flex", flex: 1, alignItems: "center", ...base, padding: "0", overflow: "hidden", border: "1.5px solid #f0c878", background: "white" }}>
+                <span style={{ padding: "10px 8px 10px 12px", fontSize: "13px", color: MU, borderRight: `1px solid ${BR}`, whiteSpace: "nowrap" }}>https://</span>
+                <input value={settingsDraft.sub || subdomain} onChange={e => setSettingsDraft(d => ({ ...d, sub: e.target.value }))}
+                  placeholder="avero" style={{ flex: 1, border: "none", outline: "none", padding: "10px 8px", fontSize: "13px", background: "transparent", color: TX }} />
+                <span style={{ padding: "10px 12px 10px 4px", fontSize: "13px", color: MU, whiteSpace: "nowrap" }}>.teamwork.com</span>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <span style={{ fontSize: "12px", color: TX, whiteSpace: "nowrap", minWidth: "80px" }}>API Token</span>
+              <input type="password" value={settingsDraft.key || apiKey} onChange={e => setSettingsDraft(d => ({ ...d, key: e.target.value }))}
+                placeholder="Your Teamwork API token" style={{ ...base, flex: 1, border: "1.5px solid #f0c878", background: "white", fontSize: "13px" }} />
+            </div>
+            <button onClick={() => saveSettings(settingsDraft.key || apiKey, settingsDraft.sub || subdomain)}
+              style={{ marginTop: "4px", padding: "10px", background: `linear-gradient(135deg,${G},${DG})`, border: "none", borderRadius: "8px", color: "white", fontWeight: "700", fontSize: "13px", cursor: "pointer", fontFamily: "inherit" }}>
+              Connect
+            </button>
           </div>
-          <div style={{ fontSize: "11px", color: "#b08030", marginTop: "6px" }}>Your key is stored locally in your browser only</div>
+          <div style={{ fontSize: "11px", color: "#b08030", marginTop: "8px", textAlign: "center" }}>
+            API token: Teamwork → Settings → API → Your Token
+          </div>
         </div>
       ) : (
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button onClick={() => setShowKeyInput(!showKeyInput)} style={{ padding: "5px 12px", background: LG, border: `1.5px solid ${BR}`, borderRadius: "6px", color: G, fontSize: "11px", fontWeight: "600", cursor: "pointer", fontFamily: "inherit" }}>
-            {showKeyInput ? "Hide" : "API Key ⚙"}
+          <button onClick={() => { setSettingsDraft({ key: apiKey, sub: subdomain }); setShowSettings(!showSettings); }}
+            style={{ padding: "5px 12px", background: LG, border: `1.5px solid ${BR}`, borderRadius: "6px", color: G, fontSize: "11px", fontWeight: "600", cursor: "pointer", fontFamily: "inherit" }}>
+            {showSettings ? "Hide" : `⚙ ${subdomain}.teamwork.com`}
           </button>
         </div>
       )}
-      {showKeyInput && apiKey && (
-        <div style={{ display: "flex", gap: "8px", marginTop: "8px", alignItems: "center" }}>
-          <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)}
-            style={{ ...base, flex: 1, fontSize: "13px" }} />
-          <button onClick={() => saveApiKey(apiKey)} style={{ padding: "8px 16px", background: G, border: "none", borderRadius: "8px", color: "white", fontWeight: "600", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>Save</button>
-          <button onClick={() => { saveApiKey(""); setShowKeyInput(false); setProjects([]); setTaskLists([]); }} style={{ padding: "8px 16px", background: "#fff0f0", border: "1.5px solid #ffb0b0", borderRadius: "8px", color: "#c04040", fontWeight: "600", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>Remove</button>
+      {showSettings && configured && (
+        <div style={{ marginTop: "8px", background: "#f7fbf9", border: `1.5px solid ${BR}`, borderRadius: "10px", padding: "14px", display: "flex", flexDirection: "column", gap: "8px" }}>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <span style={{ fontSize: "12px", color: TX, whiteSpace: "nowrap", minWidth: "80px" }}>Subdomain</span>
+            <input value={settingsDraft.sub} onChange={e => setSettingsDraft(d => ({ ...d, sub: e.target.value }))}
+              style={{ ...base, flex: 1, fontSize: "13px" }} />
+          </div>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <span style={{ fontSize: "12px", color: TX, whiteSpace: "nowrap", minWidth: "80px" }}>API Token</span>
+            <input type="password" value={settingsDraft.key} onChange={e => setSettingsDraft(d => ({ ...d, key: e.target.value }))}
+              style={{ ...base, flex: 1, fontSize: "13px" }} />
+          </div>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button onClick={() => saveSettings(settingsDraft.key, settingsDraft.sub)}
+              style={{ padding: "8px 16px", background: G, border: "none", borderRadius: "8px", color: "white", fontWeight: "600", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>Save</button>
+            <button onClick={() => { saveSettings("", ""); setProjects([]); setTaskLists([]); }}
+              style={{ padding: "8px 16px", background: "#fff0f0", border: "1.5px solid #ffb0b0", borderRadius: "8px", color: "#c04040", fontWeight: "600", fontSize: "12px", cursor: "pointer", fontFamily: "inherit" }}>Disconnect</button>
+          </div>
         </div>
       )}
     </div>
@@ -304,7 +326,7 @@ Return the task URL if available.`;
           </div>
         </div>
 
-        {apiKeyBar}
+        {settingsBar}
 
         <div style={{ background: "white", borderRadius: "18px", padding: "28px", boxShadow: "0 8px 40px rgba(14,98,69,.09)", border: "1px solid rgba(197,221,208,.5)" }}>
           <StepBar current={step} />
@@ -364,7 +386,7 @@ Return the task URL if available.`;
                 {loadingProjects
                   ? <div style={{ ...base, color: MU, display:"flex", alignItems:"center", gap:"8px" }}><div style={{ width:"13px", height:"13px", border:`2px solid ${BR}`, borderTopColor:G, borderRadius:"50%", animation:"spin .7s linear infinite", flexShrink:0 }} />Loading projects...</div>
                   : <select value={form.project} onChange={e => onProjectChange(e.target.value)} style={sel(errors.project)}>
-                      <option value="">Select project...</option>
+                      <option value="">{!configured ? "Connect to Teamwork first..." : "Select project..."}</option>
                       {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                 }
@@ -462,7 +484,7 @@ Return the task URL if available.`;
             <button onClick={back} disabled={step===0} style={{ padding:"10px 22px", background:step===0?"#f7fbf9":"#eaf3ee", border:`1.5px solid ${BR}`, borderRadius:"9px", color:step===0?BR:G, fontWeight:"600", fontSize:"14px", cursor:step===0?"default":"pointer", fontFamily:"inherit" }}>← Back</button>
             {step < 3
               ? <button onClick={next} style={{ padding:"10px 26px", background:`linear-gradient(135deg,${G},${DG})`, border:"none", borderRadius:"9px", color:"white", fontWeight:"700", fontSize:"14px", cursor:"pointer", fontFamily:"inherit", boxShadow:"0 4px 14px rgba(14,98,69,.22)" }}>Continue →</button>
-              : <button onClick={submit} disabled={submitting} style={{ padding:"11px 28px", background:submitting?BR:`linear-gradient(135deg,${G},${DG})`, border:"none", borderRadius:"9px", color:"white", fontWeight:"700", fontSize:"14px", cursor:submitting?"default":"pointer", fontFamily:"inherit", boxShadow:submitting?"none":"0 4px 14px rgba(14,98,69,.22)", display:"flex", alignItems:"center", gap:"8px" }}>
+              : <button onClick={submit} disabled={submitting || !configured} style={{ padding:"11px 28px", background:(submitting||!configured)?BR:`linear-gradient(135deg,${G},${DG})`, border:"none", borderRadius:"9px", color:"white", fontWeight:"700", fontSize:"14px", cursor:(submitting||!configured)?"default":"pointer", fontFamily:"inherit", boxShadow:(submitting||!configured)?"none":"0 4px 14px rgba(14,98,69,.22)", display:"flex", alignItems:"center", gap:"8px" }}>
                   {submitting?<><div style={{ width:"13px", height:"13px", border:"2px solid rgba(255,255,255,.4)", borderTopColor:"white", borderRadius:"50%", animation:"spin .7s linear infinite" }}/>Creating...</>:"✓ Create in Teamwork"}
                 </button>
             }
