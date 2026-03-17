@@ -198,6 +198,7 @@ export default function TaskCreator() {
           "customFields": [
             { "customFieldId": 98892, "value": form.difficulty },
             { "customFieldId": 99301, "value": form.department },
+            { "customFieldId": 100820, "value": String(parseInt(form.estimateHours) || 0) },
             { "customFieldId": 101290, "value": String(form.estimateLow) },
             { "customFieldId": 101291, "value": String(form.estimateHigh) },
           ]
