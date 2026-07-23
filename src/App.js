@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import HubSpotDealCreator from "./HubSpotDealCreator";
 
 const USERS = [
   { id: 708003, name: "Artium Koner" },
@@ -114,7 +115,7 @@ function F({ label, req, hint, err, children }) {
 
 const sel = (err) => ({ ...base, cursor: "pointer", appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M1 3l4 4 4-4' stroke='%237aaa8f' strokeWidth='1.5' fill='none' strokeLinecap='round'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center", paddingRight: "32px", border: `1.5px solid ${err ? "#c04040" : BR}` });
 
-export default function TaskCreator() {
+function TaskCreator() {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState({ taskName: "", taskType: "", priority: "", project: "", taskList: "", assignedTo: "", startDate: "", dueDate: "", estimateHours: "", estimateLow: "", estimateHigh: "", difficulty: "", department: "", description: "" });
   const [errors, setErrors] = useState({});
@@ -489,6 +490,35 @@ export default function TaskCreator() {
             }
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+const NAV_G = "#1a7a56", NAV_HS = "#ff7a59";
+
+export default function App() {
+  const [activeTool, setActiveTool] = useState("teamwork");
+
+  return (
+    <div>
+      <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 100, background: "white", borderBottom: "1px solid #e8e8e8", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", fontFamily: "'DM Sans',sans-serif" }}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');`}</style>
+        <div style={{ maxWidth: "700px", margin: "0 auto", display: "flex", alignItems: "center", padding: "0 16px", height: "48px", gap: "4px" }}>
+          <span style={{ fontSize: "14px", fontWeight: "700", color: "#33475b", marginRight: "16px" }}>Avero Tools</span>
+          <button onClick={() => setActiveTool("teamwork")}
+            style={{ padding: "8px 16px", border: "none", borderRadius: "8px", cursor: "pointer", fontFamily: "inherit", fontWeight: "600", fontSize: "13px", background: activeTool === "teamwork" ? NAV_G : "transparent", color: activeTool === "teamwork" ? "white" : "#7c98b6", transition: "all .15s" }}>
+            Teamwork
+          </button>
+          <button onClick={() => setActiveTool("hubspot")}
+            style={{ padding: "8px 16px", border: "none", borderRadius: "8px", cursor: "pointer", fontFamily: "inherit", fontWeight: "600", fontSize: "13px", background: activeTool === "hubspot" ? NAV_HS : "transparent", color: activeTool === "hubspot" ? "white" : "#7c98b6", transition: "all .15s" }}>
+            HubSpot
+          </button>
+        </div>
+      </div>
+      <div style={{ paddingTop: "48px" }}>
+        {activeTool === "teamwork" && <TaskCreator />}
+        {activeTool === "hubspot" && <HubSpotDealCreator />}
       </div>
     </div>
   );
